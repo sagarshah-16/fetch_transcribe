@@ -1,0 +1,14 @@
+[Unit]
+Description=GPT Transcribe FastAPI Service
+After=network.target
+
+[Service]
+User=your_username
+Group=your_username
+WorkingDirectory=/path/to/gpt_transcribe
+ExecStart=/path/to/gpt_transcribe/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
