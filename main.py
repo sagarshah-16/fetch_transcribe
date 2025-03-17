@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
+from typing import Dict
 
 # Create request models
 class QueryModel(BaseModel):
@@ -28,18 +29,27 @@ app.add_middleware(
 
 # Import route for transcription
 @app.post("/transcribe", tags=["Transcription"])
-async def transcribe_route(request: RequestModel):
-    return transcribe_video(request.query.url)
+async def transcribe_route(body: Dict = Body(...)):
+    url = body.get("query", {}).get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required in query object")
+    return transcribe_video(url)
 
 # Import route for tweet scraping
 @app.post("/scrape_tweet", tags=["Twitter"])
-async def scrape_tweet_route(request: RequestModel):
-    return scrape_tweet(request.query.url)
+async def scrape_tweet_route(body: Dict = Body(...)):
+    url = body.get("query", {}).get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required in query object")
+    return scrape_tweet(url)
 
 # Add website scraping endpoint
 @app.post("/scrape", tags=["Web Scraping"])
-async def scrape_website_route(request: RequestModel):
-    cleaned_content = scrape_and_clean(request.query.url)
+async def scrape_website_route(body: Dict = Body(...)):
+    url = body.get("query", {}).get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required in query object")
+    cleaned_content = scrape_and_clean(url)
     return {"cleaned_content": cleaned_content}
 
 # Add a simple health check endpoint
