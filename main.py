@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
 # Create base query model
-class QueryModel(BaseModel):
-    url: HttpUrl
+class URLRequest(BaseModel):
+    url: str
 
 # Direct imports for functions
 from run import transcribe_video
@@ -23,23 +23,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class QueryRequest(BaseModel):
-    query: QueryModel
-
 # Import route for transcription
 @app.post("/transcribe", tags=["Transcription"])
-async def transcribe_route(request: QueryRequest):
-    return transcribe_video(str(request.query.url))
+async def transcribe_route(url: URLRequest):
+    return transcribe_video(url.url)
 
 # Import route for tweet scraping
 @app.post("/scrape_tweet", tags=["Twitter"])
-async def scrape_tweet_route(request: QueryRequest):
-    return scrape_tweet(str(request.query.url))
+async def scrape_tweet_route(url: URLRequest):
+    return scrape_tweet(url.url)
 
 # Add website scraping endpoint
 @app.post("/scrape", tags=["Web Scraping"])
-async def scrape_website_route(request: QueryRequest):
-    cleaned_content = scrape_and_clean(str(request.query.url))
+async def scrape_website_route(url: URLRequest):
+    cleaned_content = scrape_and_clean(url.url)
     return {"cleaned_content": cleaned_content}
 
 # Add a simple health check endpoint
