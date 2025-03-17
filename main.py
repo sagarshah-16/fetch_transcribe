@@ -1,10 +1,15 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, HttpUrl
 
-# Direct imports for type annotations and functions
-from run import VideoURL, transcribe_video
-from twitter import TweetURL, scrape_tweet
-from scrape_website import URLRequest, scrape_and_clean
+# Create base query model
+class QueryModel(BaseModel):
+    url: HttpUrl
+
+# Direct imports for functions
+from run import transcribe_video
+from twitter import scrape_tweet
+from scrape_website import scrape_and_clean
 
 # Create main FastAPI app
 app = FastAPI(title="GPT Transcribe API", description="API for transcribing videos and scraping tweets")
@@ -18,20 +23,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class QueryRequest(BaseModel):
+    query: QueryModel
+
 # Import route for transcription
 @app.post("/transcribe", tags=["Transcription"])
-async def transcribe_route(video_url: VideoURL):
-    return transcribe_video(video_url)
+async def transcribe_route(request: QueryRequest):
+    return transcribe_video(str(request.query.url))
 
 # Import route for tweet scraping
 @app.post("/scrape_tweet", tags=["Twitter"])
-async def scrape_tweet_route(tweet_url: TweetURL):
-    return scrape_tweet(tweet_url)
+async def scrape_tweet_route(request: QueryRequest):
+    return scrape_tweet(str(request.query.url))
 
 # Add website scraping endpoint
 @app.post("/scrape", tags=["Web Scraping"])
-async def scrape_website_route(request: URLRequest):
-    cleaned_content = scrape_and_clean(request.url)
+async def scrape_website_route(request: QueryRequest):
+    cleaned_content = scrape_and_clean(str(request.query.url))
     return {"cleaned_content": cleaned_content}
 
 # Add a simple health check endpoint

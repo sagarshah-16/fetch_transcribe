@@ -1,5 +1,4 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, HttpUrl
 import yt_dlp
 import whisper
 import os
@@ -9,9 +8,6 @@ app = FastAPI()
 
 # Initialize Whisper model
 model = whisper.load_model("base")  # Change to "small", "medium" or "large" for better accuracy
-
-class VideoURL(BaseModel):
-    url: HttpUrl
 
 # Function to download video and extract audio
 def download_audio(url: str) -> str:
@@ -55,8 +51,7 @@ def transcribe_audio(audio_path: str) -> str:
             if os.path.exists(video_file):
                 os.remove(video_file)
 
-@app.post("/transcribe")
-def transcribe_video(video_url: VideoURL):
-    audio_file = download_audio(str(video_url.url))
+def transcribe_video(url: str):
+    audio_file = download_audio(url)
     transcription = transcribe_audio(audio_file)
     return {"transcription": transcription}

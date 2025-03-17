@@ -1,13 +1,8 @@
 from fastapi import FastAPI, HTTPException
 import requests
 from bs4 import BeautifulSoup
-from pydantic import BaseModel, HttpUrl
 
 app = FastAPI()
-
-class URLRequest(BaseModel):
-    url: HttpUrl
-
 
 def scrape_and_clean(url: str):
     headers = {
@@ -36,6 +31,6 @@ def scrape_and_clean(url: str):
 
 
 @app.post("/scrape")
-def scrape_url(request: URLRequest):
-    cleaned_content = scrape_and_clean(request.url)
+def scrape_url(url: str):
+    cleaned_content = scrape_and_clean(url)
     return {"cleaned_content": cleaned_content}

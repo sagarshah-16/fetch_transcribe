@@ -1,7 +1,6 @@
 import os
 import tweepy
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, HttpUrl
 import re
 import yt_dlp
 import uuid
@@ -10,7 +9,6 @@ from itertools import cycle
 
 app = FastAPI()
 
-# List of Bearer tokens (replace with your tokens)
 # Load environment variables from .env
 load_dotenv()
 
@@ -20,9 +18,6 @@ BEARER_TOKENS = [
     os.getenv("TWITTER_BEARER_TOKEN_2")
 ]
 
-# Debug: print tokens temporarily (remove later!)
-print("Loaded tokens:", BEARER_TOKENS)
-
 # Check that tokens are loaded properly
 if not all(BEARER_TOKENS):
     raise ValueError("One or more Twitter bearer tokens are missing in the .env file.")
@@ -30,9 +25,6 @@ if not all(BEARER_TOKENS):
 # Tweepy clients with multiple tokens
 clients = [tweepy.Client(bearer_token=token) for token in BEARER_TOKENS]
 client_cycle = cycle(clients)
-
-class TweetURL(BaseModel):
-    url: HttpUrl
 
 def download_video(video_url: str, output_folder: str = "videos") -> str:
     if not os.path.exists(output_folder):
@@ -68,9 +60,8 @@ def fetch_tweet_with_retry(tweet_id: str, retries: int = len(clients)):
             raise HTTPException(status_code=500, detail=f"Twitter API error: {str(e)}")
     raise HTTPException(status_code=429, detail="All tokens have hit rate limits. Please try again later.")
 
-@app.post("/scrape_tweet")
-def scrape_tweet(tweet_url: TweetURL):
-    tweet_id_match = re.search(r"/status/(\d+)", str(tweet_url.url))
+def scrape_tweet(url: str):
+    tweet_id_match = re.search(r"/status/(\d+)", url)
     if not tweet_id_match:
         raise HTTPException(status_code=400, detail="Invalid tweet URL")
 
