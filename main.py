@@ -49,8 +49,8 @@ async def scrape_website_route(body: Dict = Body(...)):
     url = body.get("query", {}).get("url")
     if not url:
         raise HTTPException(status_code=400, detail="URL is required in query object")
-    cleaned_content = scrape_and_clean(url)
-    return {"cleaned_content": cleaned_content}
+    markdown_content = await scrape_and_clean(url)
+    return {"cleaned_content": markdown_content}
 
 # Add a simple health check endpoint
 @app.get("/health", tags=["System"])
