@@ -43,12 +43,35 @@ def download_audio(url: str) -> str:
             # Create a unique ID for the file
             file_id = str(uuid.uuid4())
 
-            # Create output directory if it doesn't exist
+            # Create output directory with proper permissions
             output_dir = os.path.join(os.getcwd(), "downloads")
-            os.makedirs(output_dir, exist_ok=True)
 
-            # Set output filename
+            # Print diagnostic info about directories
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"Output directory path: {output_dir}")
+
+            # Create directory with proper permissions if it doesn't exist
+            if not os.path.exists(output_dir):
+                print(f"Creating downloads directory: {output_dir}")
+                os.makedirs(output_dir, exist_ok=True)
+                # Try to set directory permissions if running as root/sudo
+                try:
+                    os.chmod(output_dir, 0o777)  # Full permissions for troubleshooting
+                    print(f"Set permissions on {output_dir}")
+                except Exception as perm_error:
+                    print(f"Warning: Could not set permissions on directory: {perm_error}")
+
+            # Check if directory exists and is writable
+            if not os.path.exists(output_dir):
+                raise Exception(f"Failed to create downloads directory: {output_dir}")
+            if not os.access(output_dir, os.W_OK):
+                raise Exception(f"Downloads directory is not writable: {output_dir}")
+
+            # Set output filename (use a temp filename without extension)
+            temp_filename = f"{file_id}"
             output_path = os.path.join(output_dir, f"{file_id}.mp3")
+
+            print(f"Will download to: {output_path}")
 
             # Configure yt-dlp options
             ydl_opts = {
@@ -58,7 +81,7 @@ def download_audio(url: str) -> str:
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
-                'outtmpl': output_path,
+                'outtmpl': os.path.join(output_dir, temp_filename),  # Download without extension
                 'quiet': False,
                 'no_warnings': False,
             }
@@ -179,106 +202,153 @@ def download_audio(url: str) -> str:
             else:
                 raise Exception(f"Failed to download audio: {error_message}")
 
-# Function to transcribe audio and clean up files
+# Function to transcribe audio using Whisper
 def transcribe_audio(audio_path: str) -> str:
-    print(f"Transcribing audio file: {audio_path}")
+    """
+    Transcribe an audio file using Whisper
 
+    This function has been replaced by direct transcription in the transcribe_video function
+    and will be removed in a future version.
+    """
     # Record this operation in Sentry
-    sentry_sdk.add_breadcrumb(
-        category="transcription",
-        message=f"Starting transcription of {audio_path}",
-        level="info"
-    )
+    with sentry_sdk.start_span(op="transcribe_audio", description=f"Transcribe {audio_path}"):
+        try:
+            # Check if file exists before transcribing
+            if not os.path.exists(audio_path):
+                error_msg = f"Audio file not found: {audio_path}"
+                print(error_msg)
+                sentry_sdk.capture_message(error_msg, level="error")
+                raise Exception(error_msg)
 
-    try:
-        # Start a transaction for performance monitoring
-        with sentry_sdk.start_transaction(op="transcribe", name=f"Transcribe {audio_path}"):
+            print(f"Transcribing audio: {audio_path}")
             result = model.transcribe(audio_path)
 
-            # Record successful transcription
+            # Log successful transcription
             sentry_sdk.add_breadcrumb(
                 category="transcription",
-                message=f"Successfully transcribed {audio_path}",
+                message=f"Successfully transcribed audio at {audio_path}",
                 level="info",
-                data={"text_length": len(result['text'])}
+                data={"text_length": len(result["text"])}
             )
 
-            return result['text']
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Transcription error: {error_msg}")
-
-        # Record the error with Sentry
-        with sentry_sdk.push_scope() as scope:
-            scope.set_tag("operation", "transcribe_audio")
-            scope.set_context("audio_file", {"path": audio_path})
-            sentry_sdk.capture_exception(e)
-
-        raise HTTPException(status_code=500, detail=f"Transcription error: {error_msg}")
-    finally:
-        # Remove audio file after transcription
-        try:
-            if os.path.exists(audio_path):
+            # Clean up the file
+            try:
                 os.remove(audio_path)
+                print(f"Deleted audio file: {audio_path}")
+            except Exception as cleanup_error:
+                print(f"Failed to delete audio file: {audio_path}, error: {cleanup_error}")
+                # Record the error but continue
                 sentry_sdk.add_breadcrumb(
                     category="cleanup",
-                    message=f"Removed audio file: {audio_path}",
-                    level="info"
+                    message=f"Failed to delete audio file: {audio_path}",
+                    level="warning"
                 )
+                sentry_sdk.capture_message(f"Error during file cleanup: {str(cleanup_error)}", level="warning")
 
-            # Remove original video files if still present
-            video_extensions = ['webm', 'mp4', 'mkv', 'mov', 'avi', 'm4a']
-            base_filename = os.path.splitext(audio_path)[0]
-            for ext in video_extensions:
-                video_file = f"{base_filename}.{ext}"
-                if os.path.exists(video_file):
-                    os.remove(video_file)
-                    sentry_sdk.add_breadcrumb(
-                        category="cleanup",
-                        message=f"Removed video file: {video_file}",
-                        level="info"
-                    )
-        except Exception as cleanup_error:
-            # Record but don't raise cleanup errors
-            sentry_sdk.capture_message(f"Error during file cleanup: {str(cleanup_error)}", level="warning")
+            return result["text"]
 
-def transcribe_video(url: str):
-    # Start a transaction for the whole operation
-    with sentry_sdk.start_transaction(op="transcribe", name="Transcribe Video"):
-        # Validate and normalize URL
-        if not url:
-            sentry_sdk.capture_message("Empty URL provided to transcribe_video", level="error")
-            raise HTTPException(status_code=400, detail="URL is required")
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Transcription error: {error_msg}")
 
-        # Ensure URL has proper scheme
-        if not re.match(r'^https?://', url):
-            original_url = url
-            url = 'https://' + url
+            # Record error with Sentry
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("operation", "transcribe_audio")
+                scope.set_context("transcription_info", {
+                    "audio_path": audio_path,
+                    "file_exists": os.path.exists(audio_path),
+                })
+                sentry_sdk.capture_exception(e)
+
+            raise Exception(f"Failed to transcribe audio: {error_msg}")
+
+def transcribe_video(url: str) -> Dict[str, Any]:
+    """
+    Main function to download and transcribe a video
+    """
+    try:
+        # Record the start of the operation in Sentry
+        with sentry_sdk.start_transaction(op="transcribe", name="transcribe_video") as transaction:
+            sentry_sdk.set_tag("url", url)
+
+            # Step 1: Download the audio
             sentry_sdk.add_breadcrumb(
                 category="transcription",
-                message=f"Added https:// scheme to URL: {original_url} → {url}",
+                message=f"Starting audio download from {url}",
                 level="info"
             )
 
-        print(f"Processing transcription request for URL: {url}")
-
-        try:
             audio_file = download_audio(url)
-            transcription = transcribe_audio(audio_file)
+            print(f"Downloaded audio to: {audio_file}")
 
-            # Record successful operation
+            # Verify the file exists before proceeding
+            if not os.path.exists(audio_file):
+                error_msg = f"Downloaded audio file not found at {audio_file}"
+                print(error_msg)
+                sentry_sdk.capture_message(error_msg, level="error")
+                raise Exception(error_msg)
+
+            # Get file size for debugging
+            try:
+                file_size = os.path.getsize(audio_file)
+                print(f"Audio file size: {file_size} bytes")
+                if file_size == 0:
+                    print("Warning: Audio file is empty")
+            except Exception as size_err:
+                print(f"Could not check file size: {size_err}")
+
+            # Step 2: Transcribe the audio
             sentry_sdk.add_breadcrumb(
                 category="transcription",
-                message=f"Successfully transcribed video from {url}",
-                level="info",
-                data={"text_length": len(transcription)}
+                message=f"Starting transcription of {audio_file}",
+                level="info"
             )
 
-            return {"transcription": transcription}
-        except Exception as e:
-            # This exception should be already captured by the individual functions
-            # Just re-raise it
-            raise
+            with sentry_sdk.start_span(op="transcribe_with_whisper", description=f"Transcribe {audio_file}"):
+                try:
+                    result = model.transcribe(audio_file)
+
+                    # Record successful transcription
+                    sentry_sdk.add_breadcrumb(
+                        category="transcription",
+                        message=f"Successfully transcribed {audio_file}",
+                        level="info"
+                    )
+
+                    # Step 3: Clean up the files
+                    try:
+                        os.remove(audio_file)
+                        print(f"Removed audio file: {audio_file}")
+                    except Exception as cleanup_error:
+                        print(f"Warning: Could not remove audio file: {cleanup_error}")
+                        # Continue despite cleanup error
+
+                    # Return the transcription result
+                    return {
+                        "transcription": result["text"],
+                        "segments": result["segments"],
+                        "source_url": url,
+                    }
+                except Exception as whisper_error:
+                    # Log detailed error with the file path
+                    error_msg = str(whisper_error)
+                    print(f"Whisper transcription error: {error_msg}")
+                    with sentry_sdk.push_scope() as scope:
+                        scope.set_tag("operation", "whisper_transcribe")
+                        scope.set_context("file_info", {
+                            "path": audio_file,
+                            "exists": os.path.exists(audio_file),
+                            "size": os.path.getsize(audio_file) if os.path.exists(audio_file) else "N/A",
+                            "directory": os.path.dirname(audio_file)
+                        })
+                        sentry_sdk.capture_exception(whisper_error)
+
+                    raise Exception(f"Transcription failed: {error_msg}")
+
+    except Exception as e:
+        print(f"Transcription processing error: {str(e)}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)}")
 
 @app.post("/transcribe")
 async def transcribe_route(body: Dict[str, Any] = Body(...)):
