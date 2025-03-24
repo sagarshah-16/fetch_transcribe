@@ -10,7 +10,9 @@ A multi-purpose API for transcribing YouTube videos, scraping Twitter/X videos, 
 
 ## API Endpoints
 
-### Transcribe YouTube Videos
+### Standard Endpoints
+
+#### Transcribe YouTube Videos
 **Endpoint**: `/transcribe`
 **Method**: POST
 **Preferred Request Format**:
@@ -29,7 +31,7 @@ A multi-purpose API for transcribing YouTube videos, scraping Twitter/X videos, 
 }
 ```
 
-### Extract Videos from Tweets
+#### Extract Videos from Tweets
 **Endpoint**: `/scrape_tweet`
 **Method**: POST
 **Preferred Request Format**:
@@ -48,7 +50,7 @@ A multi-purpose API for transcribing YouTube videos, scraping Twitter/X videos, 
 }
 ```
 
-### Extract Content from Websites
+#### Extract Content from Websites
 **Endpoint**: `/scrape`
 **Method**: POST
 **Preferred Request Format**:
@@ -67,9 +69,33 @@ A multi-purpose API for transcribing YouTube videos, scraping Twitter/X videos, 
 }
 ```
 
-### Health Check
+#### Health Check
 **Endpoint**: `/health`
 **Method**: GET
+
+### Debug/Troubleshooting Endpoints
+
+If you're experiencing validation errors with the standard endpoints, you can use these alternatives that bypass the FastAPI validation system:
+
+#### Debug Request Endpoint
+**Endpoint**: `/debug`
+**Method**: POST
+Returns detailed information about your request for troubleshooting.
+
+#### Raw Transcribe Endpoint
+**Endpoint**: `/raw_transcribe`
+**Method**: POST
+Same as `/transcribe` but with raw request handling.
+
+#### Raw Tweet Scraping Endpoint
+**Endpoint**: `/raw_scrape_tweet`
+**Method**: POST
+Same as `/scrape_tweet` but with raw request handling.
+
+#### Raw Website Scraping Endpoint
+**Endpoint**: `/raw_scrape`
+**Method**: POST
+Same as `/scrape` but with raw request handling.
 
 ## Request Format Notes
 
@@ -78,6 +104,7 @@ A multi-purpose API for transcribing YouTube videos, scraping Twitter/X videos, 
   2. A JSON object with a direct `url` field
 - The URL should be a complete URL including the protocol (http:// or https://)
 - The API has fallback mechanisms to handle alternative formats like arrays
+- If experiencing validation errors, try using the raw endpoints (e.g., `/raw_scrape_tweet` instead of `/scrape_tweet`)
 
 ## Requirements
 
