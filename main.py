@@ -85,6 +85,27 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     error_message = str(exc)
+    error_type = type(exc).__name__
+
+    # Print detailed error for logging
+    print(f"GLOBAL ERROR HANDLER: {error_type}: {error_message}")
+    print(traceback.format_exc())
+
+    # Flag to track if this is a YouTube authentication error
+    is_youtube_auth_error = (
+        "Sign in to confirm you're not a bot" in error_message or
+        "could not find chrome cookies" in error_message.lower()
+    )
+
+    # Special handling for YouTube auth errors
+    if is_youtube_auth_error:
+        sentry_sdk.set_tag("error_type", "youtube_authentication_error")
+        sentry_sdk.set_level("error")
+        # Send an explicit message for this error type
+        sentry_sdk.capture_message(
+            "YouTube Authentication Error: Cookie configuration issue",
+            level="error"
+        )
 
     # Capture exception in Sentry with request info
     with sentry_sdk.push_scope() as scope:
@@ -99,13 +120,28 @@ async def global_exception_handler(request: Request, exc: Exception):
         # Add custom tags
         scope.set_tag("endpoint", request.url.path)
 
+        if is_youtube_auth_error:
+            scope.set_tag("error_type", "youtube_authentication_error")
+
+        # Try to get raw body for better context
+        try:
+            body = await request.body()
+            scope.set_context("request_body", {"raw": str(body)})
+        except:
+            pass
+
         # Capture exception
-        sentry_sdk.capture_exception(exc)
+        event_id = sentry_sdk.capture_exception(exc)
+        print(f"Sent to Sentry with ID: {event_id}")
 
     # Return error response to client
+    status_code = 500
+    if isinstance(exc, HTTPException):
+        status_code = exc.status_code
+
     return JSONResponse(
-        status_code=500,
-        content={"detail": f"Internal Server Error: {error_message}"}
+        status_code=status_code,
+        content={"detail": f"Error: {error_message}"}
     )
 
 # Add validation error handler to capture these errors in Sentry

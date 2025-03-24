@@ -7,6 +7,20 @@ import uuid
 import re
 import sentry_sdk
 import traceback
+import sys
+
+# Ensure Sentry is initialized early
+if not sentry_sdk.Hub.current.client:
+    print("Initializing Sentry SDK in run.py...")
+    sentry_sdk.init(
+        dsn=os.getenv("SENTRY_DSN", ""),
+        traces_sample_rate=1.0,
+        enable_tracing=True,
+        environment=os.getenv("ENVIRONMENT", "development"),
+        debug=True,
+    )
+    # Set common attributes
+    sentry_sdk.set_tag("service", "transcription")
 
 app = FastAPI()
 
@@ -121,15 +135,37 @@ def download_audio(url: str) -> str:
             error_message = str(e)
             error_trace = traceback.format_exc()
 
-            # Log error with context
+            # Print detailed error for debugging
+            print(f"ERROR in download_audio: {error_message}")
+            print(f"Traceback: {error_trace}")
+
+            # Capture to Sentry directly first
+            sentry_sdk.capture_exception(e)
+            sentry_sdk.capture_message(f"YouTube download error: {error_message}", level="error")
+
+            # Then add more context
             with sentry_sdk.push_scope() as scope:
                 scope.set_tag("operation", "download_audio")
+                scope.set_tag("error_source", "youtube_download")
                 scope.set_context("error_details", {
                     "message": error_message,
                     "traceback": error_trace,
                     "url": url
                 })
-                sentry_sdk.capture_exception(e)
+
+                # Log detailed diagnostics
+                if "chrome cookies" in error_message.lower():
+                    chrome_path = os.path.expanduser("~/.config/google-chrome")
+                    chrome_exists = os.path.exists(chrome_path)
+                    scope.set_context("chrome_diagnostics", {
+                        "chrome_path_exists": chrome_exists,
+                        "home_directory": os.path.expanduser("~"),
+                        "current_user": os.getenv("USER", "unknown"),
+                    })
+
+                # Capture exception again with enhanced context
+                event_id = sentry_sdk.capture_exception(e)
+                print(f"Sent to Sentry with ID: {event_id}")
 
             # Provide more detailed error message for YouTube authentication errors
             if "Sign in to confirm you're not a bot" in error_message:
