@@ -267,6 +267,13 @@ def transcribe_video(url: str) -> Dict[str, Any]:
     Main function to download and transcribe a video
     """
     try:
+        # Check if it's a TikTok URL
+        is_tiktok = "tiktok.com" in url.lower()
+
+        if is_tiktok:
+            print(f"Processing TikTok video: {url}")
+            sentry_sdk.set_tag("source", "tiktok")
+
         # Record the start of the operation in Sentry
         with sentry_sdk.start_transaction(op="transcribe", name="transcribe_video") as transaction:
             sentry_sdk.set_tag("url", url)
@@ -323,7 +330,13 @@ def transcribe_video(url: str) -> Dict[str, Any]:
                         print(f"Warning: Could not remove audio file: {cleanup_error}")
                         # Continue despite cleanup error
 
-                    # Return the transcription result
+                    # For TikTok videos, return only the transcription text
+                    if is_tiktok:
+                        return {
+                            "transcription": result["text"]
+                        }
+
+                    # For other videos, return the full result
                     return {
                         "transcription": result["text"],
                         "segments": result["segments"],
