@@ -6,6 +6,7 @@ import os
 import uuid
 import re
 import sentry_sdk
+import traceback
 
 app = FastAPI()
 
@@ -14,50 +15,88 @@ model = whisper.load_model("base")  # Change to "small", "medium" or "large" for
 
 # Function to download video and extract audio
 def download_audio(url: str) -> str:
-    print(f"Downloading audio from URL: {url}")
-    filename = f"video_{uuid.uuid4()}"
-    output_audio = f"{filename}.mp3"
+    """
+    Download audio from a video URL using yt-dlp
 
-    # Record this operation in Sentry
-    sentry_sdk.add_breadcrumb(
-        category="transcription",
-        message=f"Starting audio download from {url}",
-        level="info",
-        data={"filename": output_audio}
-    )
+    Args:
+        url: The URL of the video
 
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': f'{filename}.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-    }
+    Returns:
+        The path to the downloaded audio file
+    """
+    with sentry_sdk.start_span(op="download_audio", description=f"Download audio from {url}"):
+        try:
+            # Create a unique ID for the file
+            file_id = str(uuid.uuid4())
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            # Create output directory if it doesn't exist
+            output_dir = os.path.join(os.getcwd(), "downloads")
+            os.makedirs(output_dir, exist_ok=True)
 
-        # Record successful download
-        sentry_sdk.add_breadcrumb(
-            category="transcription",
-            message=f"Successfully downloaded audio to {output_audio}",
-            level="info"
-        )
-        return output_audio
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Download error: {error_msg}")
+            # Set output filename
+            output_path = os.path.join(output_dir, f"{file_id}.mp3")
 
-        # Record the error with Sentry
-        with sentry_sdk.push_scope() as scope:
-            scope.set_tag("operation", "download_audio")
-            scope.set_context("download_options", ydl_opts)
-            sentry_sdk.capture_exception(e)
+            # Configure yt-dlp options
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'outtmpl': output_path,
+                'quiet': False,
+                'no_warnings': False,
+                # Add cookies for YouTube authentication
+                'cookiesfrombrowser': ('chrome',),  # Use Chrome cookies
+                # Alternatively, you can use a cookies file
+                # 'cookiefile': '/path/to/cookies.txt',
+            }
 
-        raise HTTPException(status_code=400, detail=f"Download error: {error_msg}")
+            # Log detailed YouTube download attempt
+            sentry_sdk.add_breadcrumb(
+                category="download",
+                message=f"Attempting to download audio from {url}",
+                level="info",
+                data={"url": url, "options": str(ydl_opts)}
+            )
+
+            # Try to download the video
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+            # Log successful download
+            sentry_sdk.add_breadcrumb(
+                category="download",
+                message=f"Successfully downloaded audio from {url}",
+                level="info",
+                data={"output_path": output_path}
+            )
+
+            # Return the path to the audio file
+            return output_path
+
+        except Exception as e:
+            error_message = str(e)
+            error_trace = traceback.format_exc()
+
+            # Log error with context
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("operation", "download_audio")
+                scope.set_context("error_details", {
+                    "message": error_message,
+                    "traceback": error_trace,
+                    "url": url
+                })
+                sentry_sdk.capture_exception(e)
+
+            # Provide more detailed error message for YouTube authentication errors
+            if "Sign in to confirm you're not a bot" in error_message:
+                raise Exception(
+                    "YouTube requires authentication. Please contact the administrator to set up browser cookies for the server."
+                )
+            else:
+                raise Exception(f"Failed to download audio: {error_message}")
 
 # Function to transcribe audio and clean up files
 def transcribe_audio(audio_path: str) -> str:
