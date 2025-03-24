@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, validator
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import traceback
 import re
 import os
@@ -41,8 +41,25 @@ class QueryModel(BaseModel):
             v = 'https://' + v
         return v
 
+class DirectUrlModel(BaseModel):
+    url: str
+
+    @validator('url')
+    def validate_url(cls, v):
+        if not v:
+            raise ValueError('URL cannot be empty')
+        # Add schema if missing
+        if not re.match(r'^https?://', v):
+            v = 'https://' + v
+        return v
+
 class RequestModel(BaseModel):
     query: QueryModel
+
+# Define a union type for request validation
+class AlternativeRequestModel(BaseModel):
+    query: Optional[QueryModel] = None
+    url: Optional[str] = None
 
 # Direct imports for functions
 from run import transcribe_video
@@ -129,7 +146,28 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # Import route for transcription
 @app.post("/transcribe", tags=["Transcription"])
-async def transcribe_route(body: Any = Body(...)):
+async def transcribe_route(body: Union[RequestModel, DirectUrlModel, Dict[str, Any], Any] = Body(...)):
+    """
+    Transcribe a YouTube video to text.
+
+    Expected request format:
+    ```json
+    {
+      "query": {
+        "url": "https://www.youtube.com/watch?v=example"
+      }
+    }
+    ```
+
+    Alternatively, you can also use:
+    ```json
+    {
+      "url": "https://www.youtube.com/watch?v=example"
+    }
+    ```
+
+    Returns the transcription text and metadata.
+    """
     try:
         with sentry_sdk.start_transaction(op="http.server", name="transcribe_video"):
             # Handle both array and object formats
@@ -144,15 +182,31 @@ async def transcribe_route(body: Any = Body(...)):
 
             # Extract URL with robust checking
             url = None
-            if isinstance(body, dict):
-                query = body.get("query")
-                if isinstance(query, dict):
-                    url = query.get("url")
+
+            # If body is a Pydantic model
+            if hasattr(body, "url") and body.url:
+                # Direct URL in the body
+                url = body.url
+            elif hasattr(body, "query") and body.query and hasattr(body.query, "url"):
+                # URL in the query object
+                url = body.query.url
+            # If body is a dict
+            elif isinstance(body, dict):
+                # Try direct URL
+                if "url" in body and body["url"]:
+                    url = body["url"]
+                # Try URL in query object
+                elif "query" in body and isinstance(body["query"], dict):
+                    url = body["query"].get("url")
 
             if not url:
-                error_msg = "URL is required in query object"
+                error_msg = "URL is required either directly in the body or in a query object"
                 sentry_sdk.capture_message(error_msg, level="error")
                 raise HTTPException(status_code=400, detail=error_msg)
+
+            # Add schema if missing
+            if not re.match(r'^https?://', url):
+                url = 'https://' + url
 
             # Set breadcrumb for debugging
             sentry_sdk.add_breadcrumb(
@@ -170,7 +224,28 @@ async def transcribe_route(body: Any = Body(...)):
 
 # Import route for tweet scraping
 @app.post("/scrape_tweet", tags=["Twitter"])
-async def scrape_tweet_route(body: Any = Body(...)):
+async def scrape_tweet_route(body: Union[RequestModel, DirectUrlModel, Dict[str, Any], Any] = Body(...)):
+    """
+    Extract videos from a Twitter/X tweet.
+
+    Expected request format:
+    ```json
+    {
+      "query": {
+        "url": "https://twitter.com/username/status/123456789"
+      }
+    }
+    ```
+
+    Alternatively, you can also use:
+    ```json
+    {
+      "url": "https://twitter.com/username/status/123456789"
+    }
+    ```
+
+    Returns tweet text and extracted video URLs.
+    """
     try:
         with sentry_sdk.start_transaction(op="http.server", name="scrape_tweet"):
             # Handle both array and object formats
@@ -185,15 +260,31 @@ async def scrape_tweet_route(body: Any = Body(...)):
 
             # Extract URL with robust checking
             url = None
-            if isinstance(body, dict):
-                query = body.get("query")
-                if isinstance(query, dict):
-                    url = query.get("url")
+
+            # If body is a Pydantic model
+            if hasattr(body, "url") and body.url:
+                # Direct URL in the body
+                url = body.url
+            elif hasattr(body, "query") and body.query and hasattr(body.query, "url"):
+                # URL in the query object
+                url = body.query.url
+            # If body is a dict
+            elif isinstance(body, dict):
+                # Try direct URL
+                if "url" in body and body["url"]:
+                    url = body["url"]
+                # Try URL in query object
+                elif "query" in body and isinstance(body["query"], dict):
+                    url = body["query"].get("url")
 
             if not url:
-                error_msg = "URL is required in query object"
+                error_msg = "URL is required either directly in the body or in a query object"
                 sentry_sdk.capture_message(error_msg, level="error")
                 raise HTTPException(status_code=400, detail=error_msg)
+
+            # Add schema if missing
+            if not re.match(r'^https?://', url):
+                url = 'https://' + url
 
             # Set breadcrumb for debugging
             sentry_sdk.add_breadcrumb(
@@ -211,7 +302,28 @@ async def scrape_tweet_route(body: Any = Body(...)):
 
 # Add website scraping endpoint - both accepting dict and RequestModel
 @app.post("/scrape", tags=["Web Scraping"])
-async def scrape_website_route(body: Any = Body(...)):
+async def scrape_website_route(body: Union[RequestModel, DirectUrlModel, Dict[str, Any], Any] = Body(...)):
+    """
+    Extract clean, formatted content from a website.
+
+    Expected request format:
+    ```json
+    {
+      "query": {
+        "url": "https://example.com/article"
+      }
+    }
+    ```
+
+    Alternatively, you can also use:
+    ```json
+    {
+      "url": "https://example.com/article"
+    }
+    ```
+
+    Returns the extracted content in Markdown format.
+    """
     try:
         with sentry_sdk.start_transaction(op="http.server", name="scrape_website"):
             # Print the request for debugging
@@ -231,14 +343,21 @@ async def scrape_website_route(body: Any = Body(...)):
             # Extract URL with robust checking
             url = None
             try:
-                # Try to get URL from query object
-                if isinstance(body, dict):
-                    query = body.get("query")
-                    if isinstance(query, dict):
-                        url = query.get("url")
-                    elif query is None:
-                        # Maybe the body itself is the query?
-                        url = body.get("url")
+                # If body is a Pydantic model
+                if hasattr(body, "url") and body.url:
+                    # Direct URL in the body
+                    url = body.url
+                elif hasattr(body, "query") and body.query and hasattr(body.query, "url"):
+                    # URL in the query object
+                    url = body.query.url
+                # If body is a dict
+                elif isinstance(body, dict):
+                    # Try direct URL
+                    if "url" in body and body["url"]:
+                        url = body["url"]
+                    # Try URL in query object
+                    elif "query" in body and isinstance(body["query"], dict):
+                        url = body["query"].get("url")
             except Exception as e:
                 error_msg = f"Error extracting URL: {str(e)}"
                 print(error_msg)
@@ -246,7 +365,7 @@ async def scrape_website_route(body: Any = Body(...)):
 
             # Validate URL
             if not url:
-                error_msg = "URL is required in the request"
+                error_msg = "URL is required either directly in the body or in a query object"
                 sentry_sdk.capture_message(error_msg, level="error")
                 raise HTTPException(status_code=400, detail=error_msg)
 
