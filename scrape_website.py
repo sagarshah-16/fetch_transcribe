@@ -1,6 +1,11 @@
 from fastapi import FastAPI, HTTPException
 import asyncio
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerConfig
+from crawl4ai import AsyncWebCrawler, BrowserConfig
+# Create a compatible CrawlerConfig since it's not in Crawl4AI version 0.5.0.post4
+class CrawlerConfig:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -97,7 +102,19 @@ async def scrape_and_clean(url: str):
             # Use Crawl4AI
             with sentry_sdk.start_span(op="crawl4ai", description=f"Crawl {url}"):
                 async with AsyncWebCrawler(browser_config=browser_config) as crawler:
-                    result = await crawler.arun(url=url, config=crawler_config)
+                    # With version 0.5.0.post4, we may need to pass config attributes directly
+                    try:
+                        result = await crawler.arun(url=url, config=crawler_config)
+                    except TypeError:
+                        # If the above fails, try passing the config attributes directly
+                        sentry_sdk.capture_message("Falling back to direct config attributes", level="info")
+                        result = await crawler.arun(
+                            url=url,
+                            wait_for_timeout=crawler_config.wait_for_timeout,
+                            wait_for_selector=crawler_config.wait_for_selector,
+                            extract_text=crawler_config.extract_text,
+                            extract_links=crawler_config.extract_links
+                        )
 
                     # Ensure we have content
                     if not result or not result.markdown or result.markdown.strip() == "":
