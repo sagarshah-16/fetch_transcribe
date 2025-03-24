@@ -47,11 +47,52 @@ def download_audio(url: str) -> str:
                 'outtmpl': output_path,
                 'quiet': False,
                 'no_warnings': False,
-                # Add cookies for YouTube authentication
-                'cookiesfrombrowser': ('chrome',),  # Use Chrome cookies
-                # Alternatively, you can use a cookies file
-                # 'cookiefile': '/path/to/cookies.txt',
             }
+
+            # Check if a cookies file exists in the current directory or a few common locations
+            cookies_file_paths = [
+                os.path.join(os.getcwd(), "youtube_cookies.txt"),
+                os.path.join(os.getcwd(), "cookies.txt"),
+                "/var/www/fetch_transcribe/youtube_cookies.txt",
+                "/var/www/fetch_transcribe/cookies.txt"
+            ]
+
+            cookies_file = None
+            for path in cookies_file_paths:
+                if os.path.exists(path):
+                    cookies_file = path
+                    break
+
+            # Add cookies configuration if available
+            if cookies_file:
+                ydl_opts['cookiefile'] = cookies_file
+                sentry_sdk.add_breadcrumb(
+                    category="download",
+                    message=f"Using cookies file: {cookies_file}",
+                    level="info"
+                )
+            elif os.path.exists(os.path.expanduser("~/.config/google-chrome")):
+                # Only use Chrome cookies if the Chrome directory exists
+                ydl_opts['cookiesfrombrowser'] = ('chrome',)
+                sentry_sdk.add_breadcrumb(
+                    category="download",
+                    message="Using Chrome browser cookies",
+                    level="info"
+                )
+            elif os.path.exists(os.path.expanduser("~/.mozilla/firefox")):
+                # Try Firefox as fallback
+                ydl_opts['cookiesfrombrowser'] = ('firefox',)
+                sentry_sdk.add_breadcrumb(
+                    category="download",
+                    message="Using Firefox browser cookies",
+                    level="info"
+                )
+            else:
+                sentry_sdk.add_breadcrumb(
+                    category="download",
+                    message="No cookies configuration found, attempting download without authentication",
+                    level="warning"
+                )
 
             # Log detailed YouTube download attempt
             sentry_sdk.add_breadcrumb(
@@ -93,7 +134,11 @@ def download_audio(url: str) -> str:
             # Provide more detailed error message for YouTube authentication errors
             if "Sign in to confirm you're not a bot" in error_message:
                 raise Exception(
-                    "YouTube requires authentication. Please contact the administrator to set up browser cookies for the server."
+                    "YouTube requires authentication. Please upload a cookies.txt file to the application directory."
+                )
+            elif "could not find chrome cookies" in error_message.lower():
+                raise Exception(
+                    "Chrome cookies not found. Please upload a cookies.txt file to the application directory."
                 )
             else:
                 raise Exception(f"Failed to download audio: {error_message}")

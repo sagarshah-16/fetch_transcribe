@@ -4,79 +4,78 @@
 
 You are seeing this error:
 ```
-Error: 400: Download error: ERROR: [youtube] _YGZVPUziyA: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies for the authentication.
+ERROR: [youtube] Sign in to confirm you're not a bot
 ```
 
-This happens because YouTube requires authentication to confirm the server is not a bot. This is common when:
+OR
+
+```
+ERROR: could not find chrome cookies database
+```
+
+These errors happen because YouTube requires authentication to confirm the server is not a bot. This is common when:
 1. The server makes too many requests to YouTube
 2. YouTube detects automated access patterns
 3. The IP address of the server is shared/from a datacenter
 
-## Solution
+## Quick Solution (Recommended)
 
-### Option 1: Use Browser Cookies (Recommended)
+The simplest way to fix this issue is to upload a YouTube cookies file to the server:
 
-The application has been updated to automatically use cookies from Chrome on the server. For this to work:
-
-1. SSH into your server
-2. Log in to YouTube in Chrome on the server:
-   ```bash
-   # Install Chrome if not already installed
-   sudo apt update
-   sudo apt install -y curl
-   curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
-   echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-   sudo apt update
-   sudo apt install -y google-chrome-stable
-
-   # Install X virtual framebuffer to run Chrome headlessly
-   sudo apt install -y xvfb
-
-   # Start X virtual framebuffer
-   Xvfb :99 -screen 0 1024x768x16 &
-   export DISPLAY=:99
-
-   # Launch Chrome and log in to YouTube
-   google-chrome --no-sandbox https://youtube.com
-   ```
-
-3. Follow prompts to log in to YouTube
-4. Restart the FastAPI service:
-   ```bash
-   sudo systemctl restart fastapi
-   ```
-
-### Option 2: Use a Cookies File
-
-If Option 1 doesn't work or you prefer not to install Chrome on the server:
-
-1. On your local machine, install a browser extension to export cookies:
+1. On your local computer (not the server), install a browser extension to export cookies:
    - For Chrome: "Get cookies.txt" or "EditThisCookie"
    - For Firefox: "Cookie Quick Manager"
 
-2. Go to YouTube and log in
-3. Export cookies to a .txt file using the extension
-4. Upload the cookies file to your server:
+2. Go to YouTube in your browser and log in (make sure you're logged in)
+
+3. Use the extension to export cookies to a .txt file (make sure to include YouTube cookies)
+
+4. Upload the cookies file to the server:
    ```bash
+   # Replace with your actual server details
    scp cookies.txt user@your-server:/var/www/fetch_transcribe/youtube_cookies.txt
    ```
 
-5. Update the yt-dlp configuration in `run.py`:
-   ```python
-   ydl_opts = {
-       # ... other options ...
-       'cookiefile': '/var/www/fetch_transcribe/youtube_cookies.txt',
-       # Comment out the cookiesfrombrowser line
-       # 'cookiesfrombrowser': ('chrome',),
-   }
+5. Make sure the cookies file is readable by the application:
+   ```bash
+   sudo chown www-data:www-data /var/www/fetch_transcribe/youtube_cookies.txt
+   sudo chmod 644 /var/www/fetch_transcribe/youtube_cookies.txt
    ```
 
-6. Restart the FastAPI service:
+6. Restart the service:
    ```bash
    sudo systemctl restart fastapi
    ```
 
-### Option 3: Use a YouTube API Key (Alternative Solution)
+The application will automatically detect and use this cookies file when downloading from YouTube.
+
+## Alternative Solutions
+
+### 1. Install Chrome and Log in on the Server
+
+If you have GUI access to the server or can run a virtual display:
+
+```bash
+# Install Chrome
+sudo apt update
+sudo apt install -y curl
+curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+sudo apt update
+sudo apt install -y google-chrome-stable
+
+# Install X virtual framebuffer to run Chrome headlessly
+sudo apt install -y xvfb
+
+# Start X virtual framebuffer
+Xvfb :99 -screen 0 1024x768x16 &
+export DISPLAY=:99
+
+# Launch Chrome and log in to YouTube
+google-chrome --no-sandbox https://youtube.com
+```
+
+### 2. Use a YouTube API Key
 
 For a more permanent solution, consider using the YouTube Data API:
 
@@ -92,16 +91,14 @@ If you're still experiencing issues:
 
 1. Check that the cookies are valid and not expired:
    ```bash
-   # When using cookiesfrombrowser
-   yt-dlp --list-extractors | grep -i cookie
-   yt-dlp --cookies-from-browser chrome https://www.youtube.com/watch?v=dQw4w9WgXcQ --dump-headers
-
-   # When using a cookies file
-   yt-dlp --cookies /var/www/fetch_transcribe/youtube_cookies.txt https://www.youtube.com/watch?v=dQw4w9WgXcQ --dump-headers
+   # Test if your cookies file works
+   yt-dlp --cookies /var/www/fetch_transcribe/youtube_cookies.txt https://www.youtube.com/watch?v=dQw4w9WgXcQ
    ```
 
-2. Try using a VPN or proxy to access YouTube from a different IP address
-3. Consider implementing a rate limiter to prevent too many requests to YouTube
+2. Make sure the cookies file contains YouTube cookies
+3. Try logging in again and exporting fresh cookies
+4. Check file permissions on the cookies file
+5. Try using a different browser to export cookies
 
 ## Reference
 
