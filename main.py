@@ -9,6 +9,7 @@ import os
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
+from fastapi.exceptions import RequestValidationError
 
 # Initialize Sentry SDK
 sentry_sdk.init(
@@ -87,14 +88,71 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": f"Internal Server Error: {error_message}"}
     )
 
+# Add validation error handler to capture these errors in Sentry
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    error_details = exc.errors()
+    error_message = "Validation error"
+
+    # Get raw request body
+    try:
+        body = await request.json()
+    except:
+        body = "Could not parse request body"
+
+    # Capture exception in Sentry with request info
+    with sentry_sdk.push_scope() as scope:
+        # Add request info
+        scope.set_context("request", {
+            "url": str(request.url),
+            "method": request.method,
+            "headers": dict(request.headers),
+            "client_ip": request.client.host if request.client else None,
+            "body": body
+        })
+
+        # Add validation error details
+        scope.set_context("validation_errors", error_details)
+
+        # Add custom tags
+        scope.set_tag("endpoint", request.url.path)
+        scope.set_tag("error_type", "validation_error")
+
+        # Capture exception
+        sentry_sdk.capture_exception(exc)
+
+    # Return validation error response
+    return JSONResponse(
+        status_code=422,
+        content={"detail": error_details}
+    )
+
 # Import route for transcription
 @app.post("/transcribe", tags=["Transcription"])
-async def transcribe_route(body: Dict = Body(...)):
+async def transcribe_route(body: Any = Body(...)):
     try:
         with sentry_sdk.start_transaction(op="http.server", name="transcribe_video"):
-            url = body.get("query", {}).get("url")
+            # Handle both array and object formats
+            if isinstance(body, list) and len(body) > 0:
+                # Handle array format with first item
+                sentry_sdk.add_breadcrumb(
+                    category="request",
+                    message="Received array request body format, using first item",
+                    level="info"
+                )
+                body = body[0]
+
+            # Extract URL with robust checking
+            url = None
+            if isinstance(body, dict):
+                query = body.get("query")
+                if isinstance(query, dict):
+                    url = query.get("url")
+
             if not url:
-                raise HTTPException(status_code=400, detail="URL is required in query object")
+                error_msg = "URL is required in query object"
+                sentry_sdk.capture_message(error_msg, level="error")
+                raise HTTPException(status_code=400, detail=error_msg)
 
             # Set breadcrumb for debugging
             sentry_sdk.add_breadcrumb(
@@ -112,12 +170,30 @@ async def transcribe_route(body: Dict = Body(...)):
 
 # Import route for tweet scraping
 @app.post("/scrape_tweet", tags=["Twitter"])
-async def scrape_tweet_route(body: Dict = Body(...)):
+async def scrape_tweet_route(body: Any = Body(...)):
     try:
         with sentry_sdk.start_transaction(op="http.server", name="scrape_tweet"):
-            url = body.get("query", {}).get("url")
+            # Handle both array and object formats
+            if isinstance(body, list) and len(body) > 0:
+                # Handle array format with first item
+                sentry_sdk.add_breadcrumb(
+                    category="request",
+                    message="Received array request body format, using first item",
+                    level="info"
+                )
+                body = body[0]
+
+            # Extract URL with robust checking
+            url = None
+            if isinstance(body, dict):
+                query = body.get("query")
+                if isinstance(query, dict):
+                    url = query.get("url")
+
             if not url:
-                raise HTTPException(status_code=400, detail="URL is required in query object")
+                error_msg = "URL is required in query object"
+                sentry_sdk.capture_message(error_msg, level="error")
+                raise HTTPException(status_code=400, detail=error_msg)
 
             # Set breadcrumb for debugging
             sentry_sdk.add_breadcrumb(
@@ -135,29 +211,44 @@ async def scrape_tweet_route(body: Dict = Body(...)):
 
 # Add website scraping endpoint - both accepting dict and RequestModel
 @app.post("/scrape", tags=["Web Scraping"])
-async def scrape_website_route(body: Dict[str, Any] = Body(...)):
+async def scrape_website_route(body: Any = Body(...)):
     try:
         with sentry_sdk.start_transaction(op="http.server", name="scrape_website"):
             # Print the request for debugging
             print(f"[/scrape] Received request body: {body}")
 
+            # Handle both array and object formats
+            if isinstance(body, list) and len(body) > 0:
+                # Handle array format with first item
+                sentry_sdk.add_breadcrumb(
+                    category="request",
+                    message="Received array request body format, using first item",
+                    level="info"
+                )
+                body = body[0]
+                print(f"[/scrape] Extracted first item from array: {body}")
+
             # Extract URL with robust checking
             url = None
             try:
                 # Try to get URL from query object
-                query = body.get("query")
-                if isinstance(query, dict):
-                    url = query.get("url")
-                elif query is None:
-                    # Maybe the body itself is the query?
-                    url = body.get("url")
+                if isinstance(body, dict):
+                    query = body.get("query")
+                    if isinstance(query, dict):
+                        url = query.get("url")
+                    elif query is None:
+                        # Maybe the body itself is the query?
+                        url = body.get("url")
             except Exception as e:
-                print(f"Error extracting URL: {str(e)}")
-                sentry_sdk.capture_message(f"Error extracting URL: {str(e)}", level="error")
+                error_msg = f"Error extracting URL: {str(e)}"
+                print(error_msg)
+                sentry_sdk.capture_message(error_msg, level="error")
 
             # Validate URL
             if not url:
-                raise HTTPException(status_code=400, detail="URL is required in the request")
+                error_msg = "URL is required in the request"
+                sentry_sdk.capture_message(error_msg, level="error")
+                raise HTTPException(status_code=400, detail=error_msg)
 
             print(f"[/scrape] Extracted URL: {url}")
 
